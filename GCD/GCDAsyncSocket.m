@@ -215,6 +215,10 @@ enum GCDAsyncSocketConfig
 	unsigned long socketFDBytesAvailable;
 	
 	GCDAsyncSocketPreBuffer *preBuffer;
+    
+    BOOL useProxy;
+    NSString * proxyAddress;
+    uint16_t proxyPort;
 		
 #if TARGET_OS_IPHONE
 	CFStreamClientContext streamContext;
@@ -1410,6 +1414,51 @@ enum GCDAsyncSocketConfig
 		block();
 	else
 		dispatch_async(socketQueue, block);
+}
+
+- (BOOL)isProxyEnabled
+{
+    if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
+	{
+		return useProxy;
+	}
+	else
+	{
+		__block BOOL result;
+		
+		dispatch_sync(socketQueue, ^{
+			result = useProxy;
+		});
+		
+		return result;
+	}
+}
+- (void)disableProxy;
+{
+    dispatch_block_t block = ^{
+		useProxy = NO;
+	};
+	
+	if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
+		block();
+	else
+		dispatch_async(socketQueue, block);
+}
+
+-(void)setProxyHost:(NSString *)hostAddress onPort:(uint16_t)port
+{
+    dispatch_block_t block = ^{
+		useProxy = YES;
+        proxyAddress = hostAddress;
+        proxyPort = port;
+        
+	};
+	
+	if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
+		block();
+	else
+		dispatch_async(socketQueue, block);
+    
 }
 
 - (id)userData
@@ -6666,6 +6715,7 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 	
 	// Getting an error concerning kCFStreamPropertySSLSettings ?
 	// You need to add the CFNetwork framework to your iOS application.
+    
 	
 	BOOL r1 = CFReadStreamSetProperty(readStream, kCFStreamPropertySSLSettings, tlsSettings);
 	BOOL r2 = CFWriteStreamSetProperty(writeStream, kCFStreamPropertySSLSettings, tlsSettings);
@@ -6935,14 +6985,34 @@ static void CFWriteStreamCallback (CFWriteStreamRef stream, CFStreamEventType ty
 	LogVerbose(@"Creating read and write stream...");
 	
 	CFStreamCreatePairWithSocket(NULL, (CFSocketNativeHandle)socketFD, &readStream, &writeStream);
+    
+    if(useProxy)
+    {
+        NSString *hostKey = (NSString *)kCFStreamPropertySOCKSProxyHost;
+        NSString *portKey = (NSString *)kCFStreamPropertySOCKSProxyPort;
+        
+        NSMutableDictionary *proxyToUse = [NSMutableDictionary
+                                           dictionaryWithObjectsAndKeys:proxyAddress,hostKey,
+                                           [NSNumber numberWithInt: proxyPort],portKey,
+                                           nil];
+        if(readStream)
+            CFReadStreamSetProperty(readStream, kCFStreamPropertySOCKSProxy, (__bridge CFTypeRef)proxyToUse);
+        if(writeStream)
+            CFWriteStreamSetProperty(writeStream, kCFStreamPropertySOCKSProxy, (__bridge CFTypeRef)proxyToUse);
+        
+    }
 	
 	// The kCFStreamPropertyShouldCloseNativeSocket property should be false by default (for our case).
 	// But let's not take any chances.
 	
 	if (readStream)
+    {
 		CFReadStreamSetProperty(readStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
+    }
 	if (writeStream)
+    {
 		CFWriteStreamSetProperty(writeStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
+    }
 	
 	if ((readStream == NULL) || (writeStream == NULL))
 	{

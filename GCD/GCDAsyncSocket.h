@@ -151,6 +151,15 @@ typedef enum GCDAsyncSocketError GCDAsyncSocketError;
 - (BOOL)isIPv4PreferredOverIPv6;
 - (void)setPreferIPv4OverIPv6:(BOOL)flag;
 
+
+/**
+ *Setup Proxy server
+ 
+**/
+- (BOOL)isProxyEnabled;
+- (void)disableProxy;
+- (void)setProxyHost:(NSString *)proxyAddress onPort:(uint16_t)port;
+
 /**
  * User data allows you to associate arbitrary information with the socket.
  * This data is not used internally by socket in any way.
