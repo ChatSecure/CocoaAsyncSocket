@@ -3770,7 +3770,7 @@ enum GCDAsyncSocketConfig
 - (BOOL)usingCFStreamForTLS
 {
 	#if TARGET_OS_IPHONE
-	{	
+	{
 		if ((flags & kSocketSecure) && (flags & kUsingCFStreamForTLS))
 		{
 			// Due to the fact that Apple doesn't give us the full power of SecureTransport on iOS,
