@@ -59,7 +59,7 @@
 #endif
 
 
-#if 0
+#if 1
 
 // Logging Enabled - See log level below
 
@@ -5459,7 +5459,7 @@ enum GCDAsyncSocketConfig
 			{
 				bytesToWrite = SIZE_MAX;
 			}
-		
+            
 			CFIndex result = CFWriteStreamWrite(writeStream, buffer, (CFIndex)bytesToWrite);
 			LogVerbose(@"CFWriteStreamWrite(%lu) = %li", (unsigned long)bytesToWrite, result);
 		
@@ -5936,7 +5936,8 @@ enum GCDAsyncSocketConfig
 		if (IS_SECURE_TRANSPORT_AVAILABLE && canUseSecureTransport)
 		{
 		#if SECURE_TRANSPORT_MAYBE_AVAILABLE
-			[self ssl_startTLS];
+			//[self ssl_startTLS];
+            [self cf_startTLS];
 		#endif
 		}
 		else
@@ -6986,19 +6987,26 @@ static void CFWriteStreamCallback (CFWriteStreamRef stream, CFStreamEventType ty
 	
 	CFStreamCreatePairWithSocket(NULL, (CFSocketNativeHandle)socketFD, &readStream, &writeStream);
     
+    BOOL r2;
+    BOOL r1;
     if(useProxy)
     {
         NSString *hostKey = (NSString *)kCFStreamPropertySOCKSProxyHost;
         NSString *portKey = (NSString *)kCFStreamPropertySOCKSProxyPort;
         
-        NSMutableDictionary *proxyToUse = [NSMutableDictionary
+        NSDictionary *proxyToUse = [NSDictionary
                                            dictionaryWithObjectsAndKeys:proxyAddress,hostKey,
                                            [NSNumber numberWithInt: proxyPort],portKey,
                                            nil];
+        
         if(readStream)
-            CFReadStreamSetProperty(readStream, kCFStreamPropertySOCKSProxy, (__bridge CFTypeRef)proxyToUse);
+        {
+            r1 = CFReadStreamSetProperty(readStream, kCFStreamPropertySOCKSProxy, (__bridge CFDictionaryRef)proxyToUse);
+        }
         if(writeStream)
-            CFWriteStreamSetProperty(writeStream, kCFStreamPropertySOCKSProxy, (__bridge CFTypeRef)proxyToUse);
+        {
+            r2 = CFWriteStreamSetProperty(writeStream, kCFStreamPropertySOCKSProxy, (__bridge CFDictionaryRef)proxyToUse);
+        }
         
     }
 	
@@ -7007,11 +7015,11 @@ static void CFWriteStreamCallback (CFWriteStreamRef stream, CFStreamEventType ty
 	
 	if (readStream)
     {
-		CFReadStreamSetProperty(readStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
+		r1 = CFReadStreamSetProperty(readStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
     }
 	if (writeStream)
     {
-		CFWriteStreamSetProperty(writeStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
+		r2 = CFWriteStreamSetProperty(writeStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
     }
 	
 	if ((readStream == NULL) || (writeStream == NULL))
