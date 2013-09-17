@@ -5936,8 +5936,8 @@ enum GCDAsyncSocketConfig
 		if (IS_SECURE_TRANSPORT_AVAILABLE && canUseSecureTransport)
 		{
 		#if SECURE_TRANSPORT_MAYBE_AVAILABLE
-			//[self ssl_startTLS];
-            [self cf_startTLS];
+			[self ssl_startTLS];
+            //[self cf_startTLS];
 		#endif
 		}
 		else
