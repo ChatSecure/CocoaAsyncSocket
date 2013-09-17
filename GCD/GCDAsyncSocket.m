@@ -7046,37 +7046,25 @@ static void CFWriteStreamCallback (CFWriteStreamRef stream, CFStreamEventType ty
 	
 	CFStreamCreatePairWithSocket(NULL, (CFSocketNativeHandle)socketFD, &readStream, &writeStream);
     
-    CFStreamStatus status =  CFReadStreamGetStatus(readStream);
-    status = CFWriteStreamGetStatus(writeStream);
-    
     BOOL r2;
     BOOL r1;
     if(useProxy)
     {
-        
-        
         NSString *hostKey = (NSString *)kCFStreamPropertySOCKSProxyHost;
         NSString *portKey = (NSString *)kCFStreamPropertySOCKSProxyPort;
         
-        NSDictionary * proxyToUse = @{hostKey:proxyAddress,portKey:@(proxyPort)};
+        NSDictionary *proxyToUse = [NSDictionary
+                                           dictionaryWithObjectsAndKeys:proxyAddress,hostKey,
+                                           [NSNumber numberWithInt: proxyPort],portKey,
+                                           nil];
         
-        //CFDictionaryRef refDictionary = (__bridge CFDictionaryRef)proxyToUse;
-        
-        CFDictionaryRef refDictionary = CFNetworkCopySystemProxySettings();
-        CFMutableDictionaryRef socksConfig = CFDictionaryCreateMutableCopy(NULL, 0, refDictionary);
-        CFDictionarySetValue(socksConfig, kCFStreamPropertySOCKSProxyHost, (__bridge CFStringRef)proxyAddress);
-        CFDictionarySetValue(socksConfig, kCFStreamPropertySOCKSProxyPort, (__bridge CFNumberRef)[NSNumber numberWithInt:proxyPort]);
-        //CFDictionarySetValue(socksConfig, kCFStreamPropertySOCKSVersion, kCFStreamSocketSOCKSVersion4);
-        CFStreamError error;
         if(readStream)
         {
-            r1 = CFReadStreamSetProperty(readStream, kCFStreamPropertySOCKSProxy, socksConfig);
-            error = CFReadStreamGetError(readStream);
+            r1 = CFReadStreamSetProperty(readStream, kCFStreamPropertySOCKSProxy, (__bridge CFDictionaryRef)proxyToUse);
         }
         if(writeStream)
         {
-            r2 = CFWriteStreamSetProperty(writeStream, kCFStreamPropertySOCKSProxy, socksConfig);
-            error = CFWriteStreamGetError(writeStream);
+            r2 = CFWriteStreamSetProperty(writeStream, kCFStreamPropertySOCKSProxy, (__bridge CFDictionaryRef)proxyToUse);
         }
         
     }
@@ -7084,7 +7072,6 @@ static void CFWriteStreamCallback (CFWriteStreamRef stream, CFStreamEventType ty
 	// The kCFStreamPropertyShouldCloseNativeSocket property should be false by default (for our case).
 	// But let's not take any chances.
 	
-    
 	if (readStream)
     {
 		r1 = CFReadStreamSetProperty(readStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
