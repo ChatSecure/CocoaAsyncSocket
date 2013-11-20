@@ -7,21 +7,28 @@
 //
 
 #import "GCDAsyncProxySocket.h"
+#import "Endian.h"
 
 typedef NS_ENUM(long, GCDAsyncProxySocketTag) {
     kAuthenticationWriteTag = 0,
-    kAuthenticationReadTag
+    kAuthenticationReadTag,
+    kDestinationWriteTag,
+    kDestinationReadTag
 };
 
-static const uint8_t kPlainAuthBytes[] = {'\x05','\x02','\x00','\x02'};
+static const uint8_t kPlainAuthBytes[] = {0x05, 0x02, 0x00, 0x02};
 static const NSUInteger kPlainAuthBytesLength = 4;
-static const uint8_t kNoAuthBytes[] = {'\x05','\x01','\x00'};
+static const uint8_t kNoAuthBytes[] = {0x05, 0x01, 0x00};
 static const NSUInteger kNoAuthBytesLength = 3;
+static const uint8_t kConnectionPreambleBytes[] = {0x05, 0x01, 0x00};
+static const NSUInteger kConnectionPreambleBytesLength = 3;
+
 
 @interface GCDAsyncProxySocket()
 @property (nonatomic, strong, readonly) GCDAsyncSocket *proxySocket;
 @property (nonatomic, readonly) dispatch_queue_t proxyDelegateQueue;
 @property (nonatomic, strong, readonly) NSString *destinationHost;
+@property (nonatomic, strong, readonly) NSData *destinationAddress;
 @property (nonatomic, readonly) uint16_t destinationPort;
 @end
 
@@ -45,6 +52,7 @@ static const NSUInteger kNoAuthBytesLength = 3;
         _proxyVersion = -1;
         _destinationHost = nil;
         _destinationPort = 0;
+        _destinationAddress = nil;
         _proxyUsername = nil;
         _proxyPassword = nil;
         _proxyDelegateQueue = dispatch_queue_create("GCDAsyncProxySocket delegate queue", 0);
@@ -77,27 +85,25 @@ static const NSUInteger kNoAuthBytesLength = 3;
     }
     
     [self.proxySocket writeData:authData withTimeout:-1 tag:kAuthenticationWriteTag];
-    /*
-    if (self.delegate && [self.delegate respondsToSelector:@selector(socket:didConnectToHost:port:)]) {
-        dispatch_async(self.delegateQueue, ^{
-            @autoreleasepool {
-                [self.delegate socket:self didConnectToHost:self.destinationHost port:self.destinationPort];
-            }
-        });
-    }*/
 }
 
 - (void) socket:(GCDAsyncSocket *)sock didWriteDataWithTag:(long)tag {
     if (tag == kAuthenticationWriteTag) {
+        NSLog(@"didWrite kAuthenticationWriteTag");
         [sock readDataToLength:2 withTimeout:-1 tag:kAuthenticationReadTag];
+    } else if (tag == kDestinationWriteTag) {
+        NSLog(@"didWrite kDestinationWriteTag");
+        [sock readDataToLength:4 withTimeout:-1 tag:kDestinationReadTag];
     }
 }
 
 - (void) socket:(GCDAsyncSocket *)sock didReadData:(NSData *)data withTag:(long)tag {
     if (tag == kAuthenticationReadTag) {
-        NSAssert(data.length != 2, @"data.length must be 2");
+        NSLog(@"didRead kAuthenticationReadTag: %@", data.description);
+        NSAssert(data.length == 2, @"data.length must be 2");
         uint8_t *bytes = (uint8_t*)[data bytes];
-        if (bytes[0] != '\x05') {
+        uint8_t firstByte = bytes[0];
+        if (firstByte != 0x05) {
             NSLog(@"Error setting up authentication");
             [sock disconnect];
             NSError *error = [NSError errorWithDomain:GCDAsyncSocketErrorDomain code:GCDAsyncProxySocketAuthenticationError userInfo:@{NSLocalizedDescriptionKey: @"Authentication Error"}];
@@ -105,10 +111,54 @@ static const NSUInteger kNoAuthBytesLength = 3;
             return;
         }
         uint8_t authValue = bytes[1];
-        if (authValue == '\x00') { // No authentication required
+        if (authValue == 0x00) { // No authentication required
             
-        } else if (authValue == '\x02') { // Password auth required
+        } else if (authValue == 0x02) { // Password auth required
             
+        } else if (authValue == 0xFF) { // all offered authentication methods were rejected
+            
+        } else { // everything is terrible
+            
+        }
+        NSMutableData *requestData = [NSMutableData dataWithBytes:kConnectionPreambleBytes length:3];
+        NSData *destinationPreamble = nil;
+        NSData *destinationAddressOrHost = nil;
+        if (self.destinationAddress) {
+            const uint8_t addressPreamble[] = {0x01};
+            destinationPreamble = [NSData dataWithBytes:addressPreamble length:1];
+            destinationAddressOrHost = self.destinationAddress;
+        } else if (self.destinationHost) {
+            const uint8_t hostPreamble[] = {0x03};
+            destinationPreamble = [NSData dataWithBytes:hostPreamble length:1];
+            uint8_t *destinationLength = malloc(sizeof(uint8_t));
+            destinationLength[0] = (uint8_t)self.destinationHost.length;
+            NSMutableData *mutableDestinationData = [NSMutableData dataWithBytes:destinationLength length:1];
+            free(destinationLength);
+            [mutableDestinationData appendData:[self.destinationHost dataUsingEncoding:NSUTF8StringEncoding]];
+            destinationAddressOrHost = mutableDestinationData;
+        }
+        [requestData appendData:destinationPreamble];
+        [requestData appendData:destinationAddressOrHost];
+        uint16_t bigEndianPort = EndianU16_NtoB(self.destinationPort);
+        uint8_t firstPortByte = bigEndianPort & 0xFF;
+        uint8_t secondPortByte = bigEndianPort >> 8;
+        NSUInteger portBytesLength = 2;
+        uint8_t *portBytes = malloc(sizeof(uint8_t) * portBytesLength);
+        portBytes[0] = firstPortByte;
+        portBytes[1] = secondPortByte;
+        NSData *portData = [NSData dataWithBytes:portBytes length:portBytesLength];
+        free(portBytes);
+        [requestData appendData:portData];
+        [sock writeData:requestData withTimeout:-1 tag:kDestinationWriteTag];
+    } else if (tag == kDestinationReadTag) {
+        NSLog(@"didRead kDestinationReadTag: %@", data.description);
+        uint8_t *bytes = (uint8_t*)[data bytes];
+        if (self.delegate && [self.delegate respondsToSelector:@selector(socket:didConnectToHost:port:)]) {
+            dispatch_async(self.delegateQueue, ^{
+                @autoreleasepool {
+                    [self.delegate socket:self didConnectToHost:self.destinationHost port:self.destinationPort];
+                }
+            });
         }
     }
 }
@@ -122,7 +172,8 @@ static const NSUInteger kNoAuthBytesLength = 3;
                 [self.delegate socketDidDisconnect:self withError:err];
             }
         });
-    }}
+    }
+}
 
 
 @end
