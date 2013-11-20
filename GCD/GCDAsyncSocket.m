@@ -205,6 +205,12 @@ enum GCDAsyncSocketConfig
 	void *IsOnSocketQueueOrTargetQueueKey;
 	
 	id userData;
+    
+    // SOCKS proxy settings
+    NSString *proxyHost;
+    uint16_t proxyPort;
+    GCDAsyncSocketSOCKSVersion proxyVersion;
+    BOOL proxyEnabled;
 }
 // Accepting
 - (BOOL)doAccept:(int)socketFD;
@@ -1081,6 +1087,11 @@ enum GCDAsyncSocketConfig
 		currentWrite = nil;
 		
 		preBuffer = [[GCDAsyncSocketPreBuffer alloc] initWithCapacity:(1024 * 4)];
+        
+        proxyEnabled = NO;
+        proxyHost = nil;
+        proxyPort = 0;
+        proxyVersion = -1;
 	}
 	return self;
 }
@@ -1411,6 +1422,35 @@ enum GCDAsyncSocketConfig
 		{
 			userData = arbitraryUserData;
 		}
+	};
+	
+	if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
+		block();
+	else
+		dispatch_async(socketQueue, block);
+}
+
+- (void) setProxyHost:(NSString *)host port:(uint16_t)port version:(GCDAsyncSocketSOCKSVersion)version {
+	dispatch_block_t block = ^{
+		proxyHost = host;
+        proxyPort = port;
+        proxyVersion = version;
+        proxyEnabled = YES;
+	};
+	
+	if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
+		block();
+	else
+		dispatch_async(socketQueue, block);
+}
+
+- (BOOL) isProxyEnabled {
+    return proxyEnabled;
+}
+
+- (void) setProxyEnabled:(BOOL)flag {
+    dispatch_block_t block = ^{
+        proxyEnabled = flag;
 	};
 	
 	if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
