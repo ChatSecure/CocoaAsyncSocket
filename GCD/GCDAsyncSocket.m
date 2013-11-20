@@ -205,12 +205,6 @@ enum GCDAsyncSocketConfig
 	void *IsOnSocketQueueOrTargetQueueKey;
 	
 	id userData;
-    
-    // SOCKS proxy settings
-    NSString *proxyHost;
-    uint16_t proxyPort;
-    GCDAsyncSocketSOCKSVersion proxyVersion;
-    BOOL proxyEnabled;
 }
 // Accepting
 - (BOOL)doAccept:(int)socketFD;
@@ -1087,11 +1081,6 @@ enum GCDAsyncSocketConfig
 		currentWrite = nil;
 		
 		preBuffer = [[GCDAsyncSocketPreBuffer alloc] initWithCapacity:(1024 * 4)];
-        
-        proxyEnabled = NO;
-        proxyHost = nil;
-        proxyPort = 0;
-        proxyVersion = -1;
 	}
 	return self;
 }
@@ -1422,48 +1411,6 @@ enum GCDAsyncSocketConfig
 		{
 			userData = arbitraryUserData;
 		}
-	};
-	
-	if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
-		block();
-	else
-		dispatch_async(socketQueue, block);
-}
-
-- (void) setProxyHost:(NSString *)host port:(uint16_t)port version:(GCDAsyncSocketSOCKSVersion)version {
-	dispatch_block_t block = ^{
-		proxyHost = host;
-        proxyPort = port;
-        proxyVersion = version;
-        proxyEnabled = YES;
-	};
-	
-	if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
-		block();
-	else
-		dispatch_async(socketQueue, block);
-}
-
-- (BOOL) isProxyEnabled {	
-	if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
-	{
-		return proxyEnabled;
-	}
-	else
-	{
-		__block BOOL result;
-		
-		dispatch_sync(socketQueue, ^{
-			result = proxyEnabled;
-		});
-		
-		return result;
-	}
-}
-
-- (void) setProxyEnabled:(BOOL)flag {
-    dispatch_block_t block = ^{
-        proxyEnabled = flag;
 	};
 	
 	if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
@@ -6966,35 +6913,6 @@ static void CFWriteStreamCallback (CFWriteStreamRef stream, CFStreamEventType ty
 	
 	CFStreamCreatePairWithSocket(NULL, (CFSocketNativeHandle)socketFD, &readStream, &writeStream);
     
-    
-    CFStreamStatus status =  CFReadStreamGetStatus(readStream);
-    status = CFWriteStreamGetStatus(writeStream);
-    
-    SInt32 socksReadError = 0, socksReadErrorDomain = 0, socksWriteError = 0, socksWriteErrorDomain = 0;
-    if(proxyEnabled)
-    {
-        NSDictionary *proxyDictionary = @{(NSString*)kCFStreamPropertySOCKSProxyHost: proxyHost, (NSString*)kCFStreamPropertySOCKSProxyPort: @(proxyPort), (NSString*)kCFStreamPropertySOCKSVersion: (NSString*)kCFStreamSocketSOCKSVersion5};
-        
-        if(readStream)
-        {
-            BOOL success = CFReadStreamSetProperty(readStream, kCFStreamPropertySOCKSProxy, (CFDictionaryRef)proxyDictionary);
-            if (!success) {
-                CFStreamError readError = CFReadStreamGetError(readStream);
-                socksReadError = CFSocketStreamSOCKSGetError(&readError);
-                socksReadErrorDomain = CFSocketStreamSOCKSGetErrorSubdomain(&readError);
-            }
-        }
-        if(writeStream)
-        {
-            BOOL success = CFWriteStreamSetProperty(writeStream, kCFStreamPropertySOCKSProxy, (CFDictionaryRef)proxyDictionary);
-            if (!success) {
-                CFStreamError writeError = CFWriteStreamGetError(writeStream);
-                socksWriteError = CFSocketStreamSOCKSGetError(&writeError);
-                socksWriteErrorDomain = CFSocketStreamSOCKSGetErrorSubdomain(&writeError);
-            }
-        }
-    }
-	
 	// The kCFStreamPropertyShouldCloseNativeSocket property should be false by default (for our case).
 	// But let's not take any chances.
 	
@@ -7002,8 +6920,6 @@ static void CFWriteStreamCallback (CFWriteStreamRef stream, CFStreamEventType ty
 		CFReadStreamSetProperty(readStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
 	if (writeStream)
 		CFWriteStreamSetProperty(writeStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
-    
-    
 	
 	if ((readStream == NULL) || (writeStream == NULL))
 	{

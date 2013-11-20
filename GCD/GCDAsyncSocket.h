@@ -75,12 +75,6 @@ extern NSString *const GCDAsyncSocketSSLDiffieHellmanParameters;
 #endif
 #endif
 
-typedef NS_ENUM(int16_t, GCDAsyncSocketSOCKSVersion) {
-    GCDAsyncSocketSOCKSVersion4 = 0,    // Not implemented
-    GCDAsyncSocketSOCKSVersion4a,       // Not implemented
-    GCDAsyncSocketSOCKSVersion5         // WIP
-};
-
 enum GCDAsyncSocketError
 {
 	GCDAsyncSocketNoError = 0,           // Never used
@@ -163,15 +157,6 @@ typedef enum GCDAsyncSocketError GCDAsyncSocketError;
 **/
 - (id)userData;
 - (void)setUserData:(id)arbitraryUserData;
-
-
-/**
- * SOCKS Proxy settings
- * Doesn't work yet
-**/
-- (void) setProxyHost:(NSString*)host port:(uint16_t)port version:(GCDAsyncSocketSOCKSVersion)version;
-- (BOOL) isProxyEnabled;
-- (void) setProxyEnabled:(BOOL)flag;
 
 #pragma mark Accepting
 
