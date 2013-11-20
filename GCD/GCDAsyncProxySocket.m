@@ -13,7 +13,9 @@ typedef NS_ENUM(long, GCDAsyncProxySocketTag) {
     kAuthenticationWriteTag = 0,
     kAuthenticationReadTag,
     kDestinationWriteTag,
-    kDestinationReadTag
+    kDestinationReadTag,
+    kDataWriteTag,
+    kDataReadTag
 };
 
 static const uint8_t kPlainAuthBytes[] = {0x05, 0x02, 0x00, 0x02};
@@ -45,6 +47,8 @@ static const NSUInteger kConnectionPreambleBytesLength = 3;
     _proxyPassword = password;
 }
 
+#pragma mark Overridden methods
+
 - (id)initWithDelegate:(id)aDelegate delegateQueue:(dispatch_queue_t)dq socketQueue:(dispatch_queue_t)sq {
     if (self = [super initWithDelegate:aDelegate delegateQueue:dq socketQueue:sq]) {
         _proxyHost = nil;
@@ -74,6 +78,16 @@ static const NSUInteger kConnectionPreambleBytesLength = 3;
     return [self.proxySocket connectToHost:self.proxyHost onPort:self.proxyPort viaInterface:inInterface withTimeout:timeout error:errPtr];
 }
 
+- (void) writeData:(NSData *)data withTimeout:(NSTimeInterval)timeout tag:(long)tag {
+    [self.proxySocket writeData:data withTimeout:-1 tag:kDataWriteTag];
+}
+
+- (void) startTLS:(NSDictionary *)tlsSettings {
+    [self.proxySocket startTLS:tlsSettings];
+}
+
+#pragma mark GCDAsyncSocketDelegate methods
+
 - (void) socket:(GCDAsyncSocket *)sock didConnectToHost:(NSString *)host port:(uint16_t)port {
     NSLog(@"proxySocket connected to proxy %@:%d / destination %@:%d", host, port, self.destinationHost, self.self.destinationPort);
     
@@ -94,6 +108,9 @@ static const NSUInteger kConnectionPreambleBytesLength = 3;
     } else if (tag == kDestinationWriteTag) {
         NSLog(@"didWrite kDestinationWriteTag");
         [sock readDataToLength:4 withTimeout:-1 tag:kDestinationReadTag];
+    } else if (tag == kDataWriteTag) {
+        NSLog(@"didWrite kDataWriteTag");
+        [sock readDataWithTimeout:-1 tag:kDataReadTag];
     }
 }
 
@@ -160,16 +177,38 @@ static const NSUInteger kConnectionPreambleBytesLength = 3;
                 }
             });
         }
+    } else if (tag == kDataReadTag) {
+        [sock readDataWithTimeout:-1 tag:kDataReadTag];
+        NSLog(@"didRead kDataReadTag: %@", data.description);
+        if (self.delegate && [self.delegate respondsToSelector:@selector(socket:didReadData:withTag:)]) {
+            dispatch_async(self.delegateQueue, ^{
+                @autoreleasepool {
+                    [self.delegate socket:self didReadData:data withTag:-1];
+                }
+            });
+        }
     }
 }
 
 - (void)socketDidDisconnect:(GCDAsyncSocket *)sock withError:(NSError *)err {
     NSLog(@"proxySocket disconnected from proxy %@:%d / destination %@:%d", self.proxyHost, self.proxyPort, self.destinationHost, self.self.destinationPort);
 
-    if (self.delegate && [self.delegate respondsToSelector:@selector(socket:didConnectToHost:port:)]) {
+    if (self.delegate && [self.delegate respondsToSelector:@selector(socketDidDisconnect:withError:)]) {
         dispatch_async(self.delegateQueue, ^{
             @autoreleasepool {
                 [self.delegate socketDidDisconnect:self withError:err];
+            }
+        });
+    }
+}
+
+- (void) socketDidSecure:(GCDAsyncSocket *)sock {
+    NSLog(@"didSecure proxy %@:%d / destination %@:%d", self.proxyHost, self.proxyPort, self.destinationHost, self.self.destinationPort);
+    
+    if (self.delegate && [self.delegate respondsToSelector:@selector(socketDidSecure:)]) {
+        dispatch_async(self.delegateQueue, ^{
+            @autoreleasepool {
+                [self.delegate socketDidSecure:self];
             }
         });
     }
