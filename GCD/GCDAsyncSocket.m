@@ -1444,8 +1444,21 @@ enum GCDAsyncSocketConfig
 		dispatch_async(socketQueue, block);
 }
 
-- (BOOL) isProxyEnabled {
-    return proxyEnabled;
+- (BOOL) isProxyEnabled {	
+	if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
+	{
+		return proxyEnabled;
+	}
+	else
+	{
+		__block BOOL result;
+		
+		dispatch_sync(socketQueue, ^{
+			result = proxyEnabled;
+		});
+		
+		return result;
+	}
 }
 
 - (void) setProxyEnabled:(BOOL)flag {
@@ -6952,6 +6965,35 @@ static void CFWriteStreamCallback (CFWriteStreamRef stream, CFStreamEventType ty
 	LogVerbose(@"Creating read and write stream...");
 	
 	CFStreamCreatePairWithSocket(NULL, (CFSocketNativeHandle)socketFD, &readStream, &writeStream);
+    
+    
+    CFStreamStatus status =  CFReadStreamGetStatus(readStream);
+    status = CFWriteStreamGetStatus(writeStream);
+    
+    SInt32 socksReadError = 0, socksReadErrorDomain = 0, socksWriteError = 0, socksWriteErrorDomain = 0;
+    if(proxyEnabled)
+    {
+        NSDictionary *proxyDictionary = @{(NSString*)kCFStreamPropertySOCKSProxyHost: proxyHost, (NSString*)kCFStreamPropertySOCKSProxyPort: @(proxyPort), (NSString*)kCFStreamPropertySOCKSVersion: (NSString*)kCFStreamSocketSOCKSVersion5};
+        
+        if(readStream)
+        {
+            BOOL success = CFReadStreamSetProperty(readStream, kCFStreamPropertySOCKSProxy, (CFDictionaryRef)proxyDictionary);
+            if (!success) {
+                CFStreamError readError = CFReadStreamGetError(readStream);
+                socksReadError = CFSocketStreamSOCKSGetError(&readError);
+                socksReadErrorDomain = CFSocketStreamSOCKSGetErrorSubdomain(&readError);
+            }
+        }
+        if(writeStream)
+        {
+            BOOL success = CFWriteStreamSetProperty(writeStream, kCFStreamPropertySOCKSProxy, (CFDictionaryRef)proxyDictionary);
+            if (!success) {
+                CFStreamError writeError = CFWriteStreamGetError(writeStream);
+                socksWriteError = CFSocketStreamSOCKSGetError(&writeError);
+                socksWriteErrorDomain = CFSocketStreamSOCKSGetErrorSubdomain(&writeError);
+            }
+        }
+    }
 	
 	// The kCFStreamPropertyShouldCloseNativeSocket property should be false by default (for our case).
 	// But let's not take any chances.
@@ -6960,6 +7002,8 @@ static void CFWriteStreamCallback (CFWriteStreamRef stream, CFStreamEventType ty
 		CFReadStreamSetProperty(readStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
 	if (writeStream)
 		CFWriteStreamSetProperty(writeStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
+    
+    
 	
 	if ((readStream == NULL) || (writeStream == NULL))
 	{
