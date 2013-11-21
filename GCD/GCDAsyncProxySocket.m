@@ -83,8 +83,18 @@ static const NSUInteger kConnectionPreambleBytesLength = 3;
 }
 
 - (void) startTLS:(NSDictionary *)tlsSettings {
-    [self.proxySocket startTLS:tlsSettings];
+    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithDictionary:tlsSettings];
+    NSString *peerName = self.destinationHost;
+    if (self.destinationAddress) {
+        peerName = [GCDAsyncSocket hostFromAddress:self.destinationAddress];
+    }
+    [settings setObject:peerName forKey:(NSString *)kCFStreamSSLPeerName];
+    [self.proxySocket startTLS:settings];
 }
+
+//- (OSStatus)sslWriteWithBuffer:(const void *)buffer length:(size_t *)bufferLength
+//- (OSStatus)sslReadWithBuffer:(void *)buffer length:(size_t *)bufferLength
+
 
 #pragma mark GCDAsyncSocketDelegate methods
 
@@ -169,7 +179,7 @@ static const NSUInteger kConnectionPreambleBytesLength = 3;
         [sock writeData:requestData withTimeout:-1 tag:kDestinationWriteTag];
     } else if (tag == kDestinationReadTag) {
         NSLog(@"didRead kDestinationReadTag: %@", data.description);
-        uint8_t *bytes = (uint8_t*)[data bytes];
+        //uint8_t *bytes = (uint8_t*)[data bytes];
         if (self.delegate && [self.delegate respondsToSelector:@selector(socket:didConnectToHost:port:)]) {
             dispatch_async(self.delegateQueue, ^{
                 @autoreleasepool {
