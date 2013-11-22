@@ -122,10 +122,10 @@
 	uint8_t version = 5; // VER
 	byteBuffer[0] = version;
 	
-	uint8_t numMethods = 1;
+	uint8_t numMethods = 1; // NMETHODS
 	byteBuffer[1] = numMethods;
 	
-	uint8_t method = 0;
+	uint8_t method = 0; // METHODS
 	byteBuffer[2] = method;
 	
 	NSData *data = [NSData dataWithBytesNoCopy:byteBuffer length:byteBufferLength freeWhenDone:YES];
@@ -167,32 +167,52 @@
 	// Address      = P:D (P=LengthOfDomain D=DomainWithoutNullTermination)
 	// Port         = 0
     
-	uint byteBufferLength = (uint)(4 + 1 + [self.destinationHost length] + 2);
-	void *byteBuffer = malloc(byteBufferLength);
-	
-	UInt8 ver = 5;
-	memcpy(byteBuffer+0, &ver, sizeof(ver));
-	
-	UInt8 cmd = 1;
-	memcpy(byteBuffer+1, &cmd, sizeof(cmd));
-	
-	UInt8 rsv = 0;
-	memcpy(byteBuffer+2, &rsv, sizeof(rsv));
-	
-
-	UInt8 atyp = 3;
-    
-	memcpy(byteBuffer+3, &atyp, sizeof(atyp));
-	
+    NSUInteger hostLength = [self.destinationHost length];
     NSData *hostData = [self.destinationHost dataUsingEncoding:NSUTF8StringEncoding];
-	UInt8 hostLength = [hostData length];
-	memcpy(byteBuffer+4, &hostLength, sizeof(hostLength));
+	NSUInteger byteBufferLength = (uint)(4 + 1 + hostLength + 2);
+	uint8_t *byteBuffer = malloc(byteBufferLength * sizeof(uint8_t));
+    NSUInteger offset = 0;
 	
-	memcpy(byteBuffer+5, [hostData bytes], hostLength);
+    // VER
+	uint8_t version = 0x05;
+    byteBuffer[0] = version;
+    offset++;
 	
-	UInt16 port = 0;
-	memcpy(byteBuffer+5+hostLength, &port, sizeof(port));
+    /* CMD
+     o  CONNECT X'01'
+     o  BIND X'02'
+     o  UDP ASSOCIATE X'03'
+    */
+	uint8_t command = 0x01;
+    byteBuffer[offset] = command;
+    offset++;
 	
+	byteBuffer[offset] = 0x00; // Reserved, must be 0
+	offset++;
+    /* ATYP
+     o  IP V4 address: X'01'
+     o  DOMAINNAME: X'03'
+     o  IP V6 address: X'04'
+    */
+	uint8_t addressType = 0x03;
+    byteBuffer[offset] = addressType;
+    offset++;
+    /* ADDR
+     o  X'01' - the address is a version-4 IP address, with a length of 4 octets
+     o  X'03' - the address field contains a fully-qualified domain name.  The first
+     octet of the address field contains the number of octets of name that
+     follow, there is no terminating NUL octet.
+     o  X'04' - the address is a version-6 IP address, with a length of 16 octets.
+     */
+    byteBuffer[offset] = hostLength;
+    offset++;
+	memcpy(byteBuffer+offset, [hostData bytes], hostLength);
+	offset+=hostLength;
+	uint16_t port = EndianU16_NtoB(self.destinationPort);
+    NSUInteger portLength = 2;
+	memcpy(byteBuffer+offset, &port, portLength);
+    offset+=portLength;
+
 	NSData *data = [NSData dataWithBytesNoCopy:byteBuffer length:byteBufferLength freeWhenDone:YES];
 	NSLog(@"TURNSocket: SOCKS_CONNECT: %@", data);
 	
@@ -233,6 +253,10 @@
 	[self socksOpen];
 }
 
+- (void) socket:(GCDAsyncSocket *)sock didReadPartialDataOfLength:(NSUInteger)partialLength tag:(long)tag {
+    NSLog(@"read partial data with tag %ld of length %d", tag, partialLength);
+}
+
 - (void)socket:(GCDAsyncSocket *)sock didReadData:(NSData *)data withTag:(long)tag
 {
     NSLog(@"did read tag[%ld] data: %@", tag, data);
@@ -266,8 +290,8 @@
 		NSLog(@"TURNSocket: SOCKS_CONNECT_REPLY_1: %@", data);
 		uint8_t *bytes = (uint8_t*)[data bytes];
         
-		UInt8 ver = bytes[0];
-		UInt8 rep = bytes[1];
+		uint8_t ver = bytes[0];
+		uint8_t rep = bytes[1];
 		
 		NSLog(@"TURNSocket: SOCKS_CONNECT_REPLY_1: ver(%o) rep(%o)", ver, rep);
 		
@@ -282,12 +306,16 @@
 			//
 			// However, some servers don't follow the protocol, and send a atyp value of 0.
 			
-			UInt8 atyp = bytes[3];
+			uint8_t addressType = bytes[3];
+            uint8_t portLength = 2;
 			
-			if (atyp == 3)
+            if (addressType == 1) { // IPv4
+                // only need to read 3 address bytes instead of 4 + portlength because we read an extra byte already
+                [self.proxySocket readDataToLength:(3+portLength) withTimeout:TIMEOUT_READ tag:SOCKS_CONNECT_REPLY_2];
+            }
+			else if (addressType == 3) // Domain name
 			{
-				UInt8 addrLength = bytes[4];
-				UInt8 portLength = 2;
+				uint8_t addrLength = bytes[4];
 				
 				NSLog(@"TURNSocket: addrLength: %o", addrLength);
 				NSLog(@"TURNSocket: portLength: %o", portLength);
@@ -295,22 +323,52 @@
 				[self.proxySocket readDataToLength:(addrLength+portLength)
 								  withTimeout:TIMEOUT_READ
 										  tag:SOCKS_CONNECT_REPLY_2];
-			}
-			else if (atyp == 0)
-			{
+			} else if (addressType == 4) { // IPv6
+                [self.proxySocket readDataToLength:(16+portLength) withTimeout:TIMEOUT_READ tag:SOCKS_CONNECT_REPLY_2];
+            } else if (addressType == 0) {
 				// The size field was actually the first byte of the port field
 				// We just have to read in that last byte
 				[self.proxySocket readDataToLength:1 withTimeout:TIMEOUT_READ tag:SOCKS_CONNECT_REPLY_2];
-			}
-			else
-			{
+			} else {
 				NSLog(@"TURNSocket: Unknown atyp field in connect reply");
 				[self.proxySocket disconnect];
 			}
 		}
 		else
 		{
+            NSString *failureReason = nil;
+            switch (rep) {
+                case 1:
+                    failureReason = @"general SOCKS server failure";
+                    break;
+                case 2:
+                    failureReason = @"connection not allowed by ruleset";
+                    break;
+                case 3:
+                    failureReason = @"Network unreachable";
+                    break;
+                case 4:
+                    failureReason = @"Host unreachable";
+                    break;
+                case 5:
+                    failureReason = @"Connection refused";
+                    break;
+                case 6:
+                    failureReason = @"TTL expired";
+                    break;
+                case 7:
+                    failureReason = @"Command not supported";
+                    break;
+                case 8:
+                    failureReason = @"Address type not supported";
+                    break;
+                default: // X'09' to X'FF' unassigned
+                    failureReason = @"unknown socks  error";
+                    break;
+            }
+            NSLog(@"SOCKS failed, disconnecting: %@", failureReason);
 			// Some kind of error occurred.
+            
 			[self.proxySocket disconnect];
 		}
 	}
