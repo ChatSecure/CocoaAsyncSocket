@@ -31,7 +31,6 @@ typedef NS_ENUM(int16_t, GCDAsyncProxySocketError) {
 
 /**
  * SOCKS Proxy settings
- * Doesn't work yet
  **/
 - (void) setProxyHost:(NSString*)host port:(uint16_t)port version:(GCDAsyncSocketSOCKSVersion)version;
 - (void) setProxyUsername:(NSString *)username password:(NSString*)password;

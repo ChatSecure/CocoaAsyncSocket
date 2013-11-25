@@ -11,10 +11,10 @@
 
 
 // Define various socket tags
-#define SOCKS_OPEN             101
-#define SOCKS_CONNECT          102
-#define SOCKS_CONNECT_REPLY_1  103
-#define SOCKS_CONNECT_REPLY_2  104
+#define SOCKS_OPEN             10100
+#define SOCKS_CONNECT          10200
+#define SOCKS_CONNECT_REPLY_1  10300
+#define SOCKS_CONNECT_REPLY_2  10400
 
 // Timeouts
 #define TIMEOUT_CONNECT       8.00
@@ -86,9 +86,15 @@
 
 - (void) startTLS:(NSDictionary *)tlsSettings {
     NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithDictionary:tlsSettings];
+    /*
     NSString *peerName = self.destinationHost;
     [settings setObject:peerName forKey:(NSString *)kCFStreamSSLPeerName];
+    */
     [self.proxySocket startTLS:settings];
+}
+
+- (void) disconnect {
+    [self.proxySocket disconnect];
 }
 
 
