@@ -1100,5 +1100,18 @@ typedef enum GCDAsyncSocketError GCDAsyncSocketError;
  * and closes the connection.
 **/
 - (BOOL)socket:(GCDAsyncSocket *)sock shouldTrustPeer:(SecTrustRef)trust;
+
+/**
+ * Allows socket delegate to hook into TLS handshake after internal validation of the trust. 
+ * It passes through the trust to be evaluated and the internal result of the trust evaluation.
+ *
+ * This is only called if socketShouldManuallyEvaluateTrust: returns NO or is not implimented.
+ *
+ * Returning YES continues the SSL handshake, returning NO terminates the handshake and closes the connection.
+ * If the status is anything other than noErr the connection will fail no matter was is returned.
+ * This method only give the ability to prevent noErr status from continuing.
+**/
+
+- (BOOL)socket:(GCDAsyncSocket *)sock shouldFinishConnectionWithTrust:(SecTrustRef)trust status:(OSStatus)status;
 #endif
 @end

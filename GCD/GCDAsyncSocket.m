@@ -6636,6 +6636,27 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 		// Trusted, continue with handshake
 		status = SSLHandshake(sslContext);
 	}
+    else if ([delegate respondsToSelector:@selector(socket:shouldFinishConnectionWithTrust:status:)] && status != errSSLWouldBlock){
+        SecTrustRef trust = NULL;
+        OSStatus trustCopyStatus = SSLCopyPeerTrust(sslContext, &trust);
+        if (trustCopyStatus != noErr) {
+            [self closeWithError:[self sslError:trustCopyStatus]];
+			return;
+        }
+        
+        __block BOOL shouldTrust = NO;
+		dispatch_sync(delegateQueue, ^{
+			@autoreleasepool {
+				shouldTrust = [delegate socket:self shouldFinishConnectionWithTrust:trust status:status];
+			}
+		});
+        
+        if (!shouldTrust)
+		{
+			[self closeWithError:[self sslError:errSSLPeerBadCert]];
+			return;
+		}
+    }
 	
 	if (status == noErr)
 	{
