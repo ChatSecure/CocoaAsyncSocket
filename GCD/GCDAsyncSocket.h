@@ -151,6 +151,15 @@ typedef enum GCDAsyncSocketError GCDAsyncSocketError;
 - (BOOL)isIPv4PreferredOverIPv6;
 - (void)setPreferIPv4OverIPv6:(BOOL)flag;
 
+
+/**
+ *Setup Proxy server
+ 
+**/
+- (BOOL)isProxyEnabled;
+- (void)disableProxy;
+- (void)setProxyHost:(NSString *)proxyAddress onPort:(uint16_t)port;
+
 /**
  * User data allows you to associate arbitrary information with the socket.
  * This data is not used internally by socket in any way.
@@ -1071,4 +1080,38 @@ typedef enum GCDAsyncSocketError GCDAsyncSocketError;
 **/
 - (void)socketDidSecure:(GCDAsyncSocket *)sock;
 
+#if SECURE_TRANSPORT_MAYBE_AVAILABLE
+/**
+ * Called to determine if the -socket:shouldTrustPeer: callback should be enabled.
+ * Returning YES here will set the SSL session option kSSLSessionOptionBreakOnServerAuth.
+ *
+ * NOTE: Currently only implemented for client sockets. Returning YES in server socket
+ * will terminate the connection.
+**/
+- (BOOL)socketShouldManuallyEvaluateTrust:(GCDAsyncSocket *)sock;
+
+/**
+ * Allows a socket delegate to hook into the TLS handshake and manually validate
+ * the peer it's connecting to.
+ *
+ * This is only called if -socketShouldManuallyEvaluateTrust: returns YES.
+ *
+ * Returning YES continues the SSL handshake, returning NO terminates the handshake
+ * and closes the connection.
+**/
+- (BOOL)socket:(GCDAsyncSocket *)sock shouldTrustPeer:(SecTrustRef)trust;
+
+/**
+ * Allows socket delegate to hook into TLS handshake after internal validation of the trust. 
+ * It passes through the trust to be evaluated and the internal result of the trust evaluation.
+ *
+ * This is only called if socketShouldManuallyEvaluateTrust: returns NO or is not implimented.
+ *
+ * Returning YES continues the SSL handshake, returning NO terminates the handshake and closes the connection.
+ * If the status is anything other than noErr the connection will fail no matter was is returned.
+ * This method only give the ability to prevent noErr status from continuing.
+**/
+
+- (BOOL)socket:(GCDAsyncSocket *)sock shouldFinishConnectionWithTrust:(SecTrustRef)trust status:(OSStatus)status;
+#endif
 @end

@@ -189,6 +189,10 @@ enum GCDAsyncSocketConfig
 	unsigned long socketFDBytesAvailable;
 	
 	GCDAsyncSocketPreBuffer *preBuffer;
+    
+    BOOL useProxy;
+    NSString * proxyAddress;
+    uint16_t proxyPort;
 		
 #if TARGET_OS_IPHONE
 	CFStreamClientContext streamContext;
@@ -1384,6 +1388,51 @@ enum GCDAsyncSocketConfig
 		block();
 	else
 		dispatch_async(socketQueue, block);
+}
+
+- (BOOL)isProxyEnabled
+{
+    if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
+	{
+		return useProxy;
+	}
+	else
+	{
+		__block BOOL result;
+		
+		dispatch_sync(socketQueue, ^{
+			result = useProxy;
+		});
+		
+		return result;
+	}
+}
+- (void)disableProxy;
+{
+    dispatch_block_t block = ^{
+		useProxy = NO;
+	};
+	
+	if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
+		block();
+	else
+		dispatch_async(socketQueue, block);
+}
+
+-(void)setProxyHost:(NSString *)hostAddress onPort:(uint16_t)port
+{
+    dispatch_block_t block = ^{
+		useProxy = YES;
+        proxyAddress = hostAddress;
+        proxyPort = port;
+        
+	};
+	
+	if (dispatch_get_specific(IsOnSocketQueueOrTargetQueueKey))
+		block();
+	else
+		dispatch_async(socketQueue, block);
+    
 }
 
 - (id)userData
@@ -3695,7 +3744,7 @@ enum GCDAsyncSocketConfig
 - (BOOL)usingCFStreamForTLS
 {
 	#if TARGET_OS_IPHONE
-	{	
+	{
 		if ((flags & kSocketSecure) && (flags & kUsingCFStreamForTLS))
 		{
 			// Due to the fact that Apple doesn't give us the full power of SecureTransport on iOS,
@@ -5384,7 +5433,7 @@ enum GCDAsyncSocketConfig
 			{
 				bytesToWrite = SIZE_MAX;
 			}
-		
+            
 			CFIndex result = CFWriteStreamWrite(writeStream, buffer, (CFIndex)bytesToWrite);
 			LogVerbose(@"CFWriteStreamWrite(%lu) = %li", (unsigned long)bytesToWrite, result);
 		
@@ -5862,6 +5911,7 @@ enum GCDAsyncSocketConfig
 		{
 		#if SECURE_TRANSPORT_MAYBE_AVAILABLE
 			[self ssl_startTLS];
+            //[self cf_startTLS];
 		#endif
 		}
 		else
@@ -6168,7 +6218,37 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 		[self closeWithError:[self otherError:@"Error in SSLSetConnection"]];
 		return;
 	}
-	
+
+
+	if (delegateQueue && [delegate respondsToSelector:@selector(socketShouldManuallyEvaluateTrust:)])
+	{
+		__block BOOL manuallyEvaluateTrust = NO;
+		dispatch_sync(delegateQueue, ^{
+			@autoreleasepool {
+				manuallyEvaluateTrust = [delegate socketShouldManuallyEvaluateTrust:self];
+			}
+		});
+
+		if (manuallyEvaluateTrust) {
+			if (isServer) {
+				[self closeWithError:[self otherError:@"Manual trust validation is not supported for server sockets"]];
+				return;
+			}
+
+			NSCAssert([delegate respondsToSelector:@selector(socket:shouldTrustPeer:)],
+			      @"You need to implement -socket:shouldTrustPeer: if you return YES for -socketShouldManuallyEvaluateTrust:");
+
+			status = SSLSetSessionOption(sslContext, kSSLSessionOptionBreakOnServerAuth, true);
+
+			// TODO: per docs on OS X <10.8, disable default trust
+
+			if (status != noErr) {
+				[self closeWithError:[self otherError:@"Error in SSLSetSessionOption"]];
+				return;
+			}
+		}
+	}
+
 	// Configure SSLContext from given settings
 	// 
 	// Checklist:
@@ -6498,9 +6578,59 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 	
 	// If the return value is noErr, the session is ready for normal secure communication.
 	// If the return value is errSSLWouldBlock, the SSLHandshake function must be called again.
+	// If the return value is errSSLServerAuthCompleted, we ask delegate if we should trust the
+	// server and then call SSLHandshake again to resume the handshake or close the connection
+	// errSSLPeerBadCert SSL error.
 	// Otherwise, the return value indicates an error code.
 	
 	OSStatus status = SSLHandshake(sslContext);
+
+	if (status == errSSLServerAuthCompleted) {
+		SecTrustRef trust = NULL;
+		status = SSLCopyPeerTrust(sslContext, &trust);
+		if (status != noErr)
+		{
+			[self closeWithError:[self sslError:status]];
+			return;
+		}
+
+		__block BOOL shouldTrust = NO;
+		dispatch_sync(delegateQueue, ^{
+			@autoreleasepool {
+				shouldTrust = [delegate socket:self shouldTrustPeer:trust];
+			}
+		});
+
+		if (!shouldTrust)
+		{
+			[self closeWithError:[self sslError:errSSLPeerBadCert]];
+			return;
+		}
+
+		// Trusted, continue with handshake
+		status = SSLHandshake(sslContext);
+	}
+    else if ([delegate respondsToSelector:@selector(socket:shouldFinishConnectionWithTrust:status:)] && status != errSSLWouldBlock){
+        SecTrustRef trust = NULL;
+        OSStatus trustCopyStatus = SSLCopyPeerTrust(sslContext, &trust);
+        if (trustCopyStatus != noErr) {
+            [self closeWithError:[self sslError:trustCopyStatus]];
+			return;
+        }
+        
+        __block BOOL shouldTrust = NO;
+		dispatch_sync(delegateQueue, ^{
+			@autoreleasepool {
+				shouldTrust = [delegate socket:self shouldFinishConnectionWithTrust:trust status:status];
+			}
+		});
+        
+        if (!shouldTrust)
+		{
+			[self closeWithError:[self sslError:errSSLPeerBadCert]];
+			return;
+		}
+    }
 	
 	if (status == noErr)
 	{
@@ -6640,6 +6770,7 @@ static OSStatus SSLWriteFunction(SSLConnectionRef connection, const void *data, 
 	
 	// Getting an error concerning kCFStreamPropertySSLSettings ?
 	// You need to add the CFNetwork framework to your iOS application.
+    
 	
 	BOOL r1 = CFReadStreamSetProperty(readStream, kCFStreamPropertySSLSettings, tlsSettings);
 	BOOL r2 = CFWriteStreamSetProperty(writeStream, kCFStreamPropertySSLSettings, tlsSettings);
@@ -6913,13 +7044,40 @@ static void CFWriteStreamCallback (CFWriteStreamRef stream, CFStreamEventType ty
 	
 	CFStreamCreatePairWithSocket(NULL, (CFSocketNativeHandle)socketFD, &readStream, &writeStream);
     
+    BOOL r2;
+    BOOL r1;
+    if(useProxy)
+    {
+        NSString *hostKey = (NSString *)kCFStreamPropertySOCKSProxyHost;
+        NSString *portKey = (NSString *)kCFStreamPropertySOCKSProxyPort;
+        
+        NSDictionary *proxyToUse = [NSDictionary
+                                           dictionaryWithObjectsAndKeys:proxyAddress,hostKey,
+                                           [NSNumber numberWithInt: proxyPort],portKey,
+                                           nil];
+        
+        if(readStream)
+        {
+            r1 = CFReadStreamSetProperty(readStream, kCFStreamPropertySOCKSProxy, (__bridge CFDictionaryRef)proxyToUse);
+        }
+        if(writeStream)
+        {
+            r2 = CFWriteStreamSetProperty(writeStream, kCFStreamPropertySOCKSProxy, (__bridge CFDictionaryRef)proxyToUse);
+        }
+        
+    }
+	
 	// The kCFStreamPropertyShouldCloseNativeSocket property should be false by default (for our case).
 	// But let's not take any chances.
 	
 	if (readStream)
-		CFReadStreamSetProperty(readStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
+    {
+		r1 = CFReadStreamSetProperty(readStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
+    }
 	if (writeStream)
-		CFWriteStreamSetProperty(writeStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
+    {
+		r2 = CFWriteStreamSetProperty(writeStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
+    }
 	
 	if ((readStream == NULL) || (writeStream == NULL))
 	{
