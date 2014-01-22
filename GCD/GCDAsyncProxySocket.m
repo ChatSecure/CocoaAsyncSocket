@@ -74,7 +74,7 @@
 - (void) writeData:(NSData *)data withTimeout:(NSTimeInterval)timeout tag:(long)tag {
     // TODO remove this for performance
     if (tag == SOCKS_OPEN || tag == SOCKS_CONNECT || tag == SOCKS_CONNECT_REPLY_1 || tag == SOCKS_CONNECT_REPLY_2) {
-        NSLog(@"This tag is reserved and won't work: %ld", tag);
+        DDLogError(@"This tag is reserved and won't work: %ld", tag);
         return;
     }
     [self.proxySocket writeData:data withTimeout:timeout tag:tag];
@@ -135,7 +135,7 @@
 	byteBuffer[2] = method;
 	
 	NSData *data = [NSData dataWithBytesNoCopy:byteBuffer length:byteBufferLength freeWhenDone:YES];
-	NSLog(@"TURNSocket: SOCKS_OPEN: %@", data);
+	DDLogVerbose(@"TURNSocket: SOCKS_OPEN: %@", data);
     
 	[self.proxySocket writeData:data withTimeout:-1 tag:SOCKS_OPEN];
 	
@@ -220,7 +220,7 @@
     offset+=portLength;
 
 	NSData *data = [NSData dataWithBytesNoCopy:byteBuffer length:byteBufferLength freeWhenDone:YES];
-	NSLog(@"TURNSocket: SOCKS_CONNECT: %@", data);
+	DDLogVerbose(@"TURNSocket: SOCKS_CONNECT: %@", data);
 	
 	[self.proxySocket writeData:data withTimeout:-1 tag:SOCKS_CONNECT];
 	
@@ -252,7 +252,7 @@
 
 - (void)socket:(GCDAsyncSocket *)sock didConnectToHost:(NSString *)host port:(UInt16)port
 {
-    NSLog(@"proxySocket did connect to %@:%d", host, port);
+    DDLogInfo(@"proxySocket did connect to %@:%d", host, port);
 	//XMPPLogTrace();
 	
 	// Start the SOCKS protocol stuff
@@ -260,12 +260,12 @@
 }
 
 - (void) socket:(GCDAsyncSocket *)sock didReadPartialDataOfLength:(NSUInteger)partialLength tag:(long)tag {
-    NSLog(@"read partial data with tag %ld of length %d", tag, partialLength);
+    DDLogVerbose(@"read partial data with tag %ld of length %d", tag, partialLength);
 }
 
 - (void)socket:(GCDAsyncSocket *)sock didReadData:(NSData *)data withTag:(long)tag
 {
-    NSLog(@"did read tag[%ld] data: %@", tag, data);
+    DDLogVerbose(@"did read tag[%ld] data: %@", tag, data);
 	//XMPPLogTrace();
 	
 	if (tag == SOCKS_OPEN)
@@ -276,7 +276,7 @@
 		UInt8 ver = bytes[0];
 		UInt8 mtd = bytes[1];
 		
-		NSLog(@"TURNSocket: SOCKS_OPEN: ver(%o) mtd(%o)", ver, mtd);
+		DDLogVerbose(@"TURNSocket: SOCKS_OPEN: ver(%o) mtd(%o)", ver, mtd);
 		
 		if(ver == 5 && mtd == 0)
 		{
@@ -293,13 +293,13 @@
 	{
 		// See socksConnect method for socks reply format
 		NSAssert(data.length == 5, @"SOCKS_CONNECT_REPLY_1 length must be 5!");
-		NSLog(@"TURNSocket: SOCKS_CONNECT_REPLY_1: %@", data);
+		DDLogVerbose(@"TURNSocket: SOCKS_CONNECT_REPLY_1: %@", data);
 		uint8_t *bytes = (uint8_t*)[data bytes];
         
 		uint8_t ver = bytes[0];
 		uint8_t rep = bytes[1];
 		
-		NSLog(@"TURNSocket: SOCKS_CONNECT_REPLY_1: ver(%o) rep(%o)", ver, rep);
+		DDLogVerbose(@"TURNSocket: SOCKS_CONNECT_REPLY_1: ver(%o) rep(%o)", ver, rep);
 		
 		if(ver == 5 && rep == 0)
 		{
@@ -323,8 +323,8 @@
 			{
 				uint8_t addrLength = bytes[4];
 				
-				NSLog(@"TURNSocket: addrLength: %o", addrLength);
-				NSLog(@"TURNSocket: portLength: %o", portLength);
+				DDLogVerbose(@"TURNSocket: addrLength: %o", addrLength);
+				DDLogVerbose(@"TURNSocket: portLength: %o", portLength);
 				
 				[self.proxySocket readDataToLength:(addrLength+portLength)
 								  withTimeout:TIMEOUT_READ
@@ -336,7 +336,7 @@
 				// We just have to read in that last byte
 				[self.proxySocket readDataToLength:1 withTimeout:TIMEOUT_READ tag:SOCKS_CONNECT_REPLY_2];
 			} else {
-				NSLog(@"TURNSocket: Unknown atyp field in connect reply");
+				DDLogVerbose(@"TURNSocket: Unknown atyp field in connect reply");
 				[self.proxySocket disconnect];
 			}
 		}
@@ -372,7 +372,7 @@
                     failureReason = @"unknown socks  error";
                     break;
             }
-            NSLog(@"SOCKS failed, disconnecting: %@", failureReason);
+            DDLogVerbose(@"SOCKS failed, disconnecting: %@", failureReason);
 			// Some kind of error occurred.
             
 			[self.proxySocket disconnect];
@@ -382,7 +382,7 @@
 	{
 		// See socksConnect method for socks reply format
 		
-		NSLog(@"TURNSocket: SOCKS_CONNECT_REPLY_2: %@", data);
+		DDLogVerbose(@"TURNSocket: SOCKS_CONNECT_REPLY_2: %@", data);
 		
         if (self.delegate && [self.delegate respondsToSelector:@selector(socket:didConnectToHost:port:)]) {
             dispatch_async(self.delegateQueue, ^{
@@ -418,7 +418,7 @@
 }
 
 - (void)socketDidDisconnect:(GCDAsyncSocket *)sock withError:(NSError *)err {
-    NSLog(@"proxySocket disconnected from proxy %@:%d / destination %@:%d", self.proxyHost, self.proxyPort, self.destinationHost, self.self.destinationPort);
+    DDLogVerbose(@"proxySocket disconnected from proxy %@:%d / destination %@:%d", self.proxyHost, self.proxyPort, self.destinationHost, self.self.destinationPort);
 
     if (self.delegate && [self.delegate respondsToSelector:@selector(socketDidDisconnect:withError:)]) {
         dispatch_async(self.delegateQueue, ^{
@@ -430,7 +430,7 @@
 }
 
 - (void) socketDidSecure:(GCDAsyncSocket *)sock {
-    NSLog(@"didSecure proxy %@:%d / destination %@:%d", self.proxyHost, self.proxyPort, self.destinationHost, self.self.destinationPort);
+    DDLogVerbose(@"didSecure proxy %@:%d / destination %@:%d", self.proxyHost, self.proxyPort, self.destinationHost, self.self.destinationPort);
     
     if (self.delegate && [self.delegate respondsToSelector:@selector(socketDidSecure:)]) {
         dispatch_async(self.delegateQueue, ^{
