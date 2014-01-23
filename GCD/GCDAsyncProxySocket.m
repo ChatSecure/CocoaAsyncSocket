@@ -261,6 +261,13 @@
 
 - (void) socket:(GCDAsyncSocket *)sock didReadPartialDataOfLength:(NSUInteger)partialLength tag:(long)tag {
     DDLogVerbose(@"read partial data with tag %ld of length %d", tag, partialLength);
+    if (self.delegate && [self.delegate respondsToSelector:@selector(socket:didReadPartialDataOfLength:tag:)]) {
+        dispatch_async(self.delegateQueue, ^{
+            @autoreleasepool {
+                [self.delegate socket:self didReadPartialDataOfLength:partialLength tag:tag];
+            }
+        });
+    }
 }
 
 - (void)socket:(GCDAsyncSocket *)sock didReadData:(NSData *)data withTag:(long)tag
@@ -439,6 +446,52 @@
             }
         });
     }
+}
+
+- (void)socketDidCloseReadStream:(GCDAsyncSocket *)sock
+{
+    if (self.delegate && [self.delegate respondsToSelector:@selector(socketDidCloseReadStream:)]) {
+        dispatch_async(self.delegateQueue, ^{
+            @autoreleasepool {
+                [self.delegate socketDidCloseReadStream:self];
+            }
+        });
+    }
+}
+
+- (void)socket:(GCDAsyncSocket *)sock didWritePartialDataOfLength:(NSUInteger)partialLength tag:(long)tag
+{
+    if (self.delegate && [self.delegate respondsToSelector:@selector(socket:didWritePartialDataOfLength:tag:)]) {
+        dispatch_async(self.delegateQueue, ^{
+            @autoreleasepool {
+                [self.delegate socket:self didWritePartialDataOfLength:partialLength tag:tag];
+            }
+        });
+    }
+}
+
+- (BOOL)socketShouldManuallyEvaluateTrust:(GCDAsyncSocket *)sock
+{
+    if (self.delegate && [self.delegate respondsToSelector:@selector(socketShouldManuallyEvaluateTrust:)]) {
+        return [self.delegate socketShouldManuallyEvaluateTrust:self];
+    }
+    return NO;
+}
+
+- (BOOL)socket:(GCDAsyncSocket *)sock shouldFinishConnectionWithTrust:(SecTrustRef)trust status:(OSStatus)status
+{
+    if (self.delegate && [self.delegate respondsToSelector:@selector(socket:shouldFinishConnectionWithTrust:status:)]) {
+        return [self.delegate socket:self shouldFinishConnectionWithTrust:trust status:status];
+    }
+    return YES;
+}
+
+- (BOOL)socket:(GCDAsyncSocket *)sock shouldTrustPeer:(SecTrustRef)trust
+{
+    if (self.delegate && [self.delegate respondsToSelector:@selector(socket:shouldTrustPeer:)]) {
+        return [self.delegate socket:self shouldTrustPeer:trust];
+    }
+    return NO;
 }
 
 
